@@ -1,14 +1,20 @@
 {
-  "name": "rds-lambda",
+  "name": "lambda-rds2",
   "version": "1.0.0",
-  "description": "",
+  "description": "Lambda function para conectar con RDS MySQL",
   "license": "ISC",
-  "author": "",
+  "author": "oskar-ortiz",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [
+    "lambda",
+    "rds",
+    "mysql",
+    "aws"
+  ],
   "dependencies": {
     "mysql2": "^3.22.0"
   }

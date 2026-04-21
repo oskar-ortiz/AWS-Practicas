@@ -3,33 +3,136 @@ name: Deploy Lambda RDS
 on:
   push:
     branches:
-      - main  # Se activa cuando haces push a la rama principal
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  LAMBDA_FUNCTION_NAME: LambdaRds2
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout del código
+      - name: Checkout del codigo
         uses: actions/checkout@v3
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: npm
 
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1 # Verifica que tu Lambda esté en us-east-1
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verificar funcion Lambda existente
+        run: |
+          echo "Verificando funcion Lambda: ${{ env.LAMBDA_FUNCTION_NAME }}"
+          aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} || echo "Funcion no encontrada"
 
       - name: Instalar dependencias
-        # Esto asegura que las librerías como mysql2 se incluyan en el despliegue
-        run: npm install 
-
-      - name: Crear paquete ZIP
-        # Empaquetamos el index.js y la carpeta node_modules
-        # Excluimos archivos innecesarios para que el zip sea ligero
-        run: zip -r function.zip index.js node_modules
-
-      - name: Desplegar en Lambda
         run: |
+          echo "Instalando dependencias para produccion..."
+          npm ci --omit=dev --silent
+          npm rebuild --arch=x64 --platform=linux --silent
+
+      - name: Preparar archivos para empaquetado
+        run: |
+          echo "Preparando archivos..."
+          mkdir -p lambda-package
+          cp index.js lambda-package/
+          cp package.json lambda-package/
+          cp package-lock.json lambda-package/
+          cp -r node_modules lambda-package/
+          ls -la lambda-package/
+
+      - name: Crear paquete ZIP optimizado
+        run: |
+          cd lambda-package
+          echo "Creando paquete ZIP..."
+          zip -r ../function.zip . \
+            -x "*.git*" \
+            -x "*.md" \
+            -x "*.test.js" \
+            -x "test/*" \
+            -x "docs/*" \
+            -x "*.log" \
+            -x "node_modules/.cache/*" \
+            -x "node_modules/*/test/*" \
+            -x "node_modules/*/docs/*" \
+            -x "node_modules/*/*.md"
+          cd ..
+
+      - name: Verificar tamano del paquete
+        run: |
+          echo "=== Informacion del paquete ==="
+          ls -lh function.zip
+          SIZE=$(stat -f%z function.zip 2>/dev/null || stat -c%s function.zip)
+          echo "Tamano: $SIZE bytes"
+          if [ $SIZE -gt 52428800 ]; then
+            echo "ADVERTENCIA: El paquete es mayor a 50MB"
+          else
+            echo "Tamano del paquete OK"
+          fi
+
+      - name: Desplegar funcion Lambda
+        run: |
+          echo "Desplegando funcion: ${{ env.LAMBDA_FUNCTION_NAME }}"
           aws lambda update-function-code \
-            --function-name Lambda-RDS \
-            --zip-file fileb://function.zip
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --output table
+
+      - name: Actualizar configuracion de la funcion
+        run: |
+          echo "Actualizando configuracion de la funcion..."
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --timeout 30 \
+            --memory-size 256 \
+            --environment "Variables={NODE_ENV=production,DB_HOST=${{ secrets.DB_HOST }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }},DB_PORT=${{ secrets.DB_PORT }}}"
+
+      - name: Esperar a que la funcion este lista
+        run: |
+          echo "Esperando a que la funcion este lista..."
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+
+      - name: Verificar despliegue exitoso
+        run: |
+          echo "=== Verificacion del despliegue ==="
+          aws lambda get-function \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --query 'Configuration.[FunctionName,Runtime,LastModified,CodeSize,State]' \
+            --output table
+
+          echo "=== Probando funcion Lambda ==="
+          aws lambda invoke \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --payload '{"routeKey":"GET /users"}' \
+            response.json || echo "No se pudo probar la funcion"
+
+          if [ -f response.json ]; then
+            echo "Respuesta de la funcion:"
+            cat response.json
+          fi
+
+      - name: Limpiar archivos temporales
+        if: always()
+        run: |
+          rm -rf lambda-package
+          rm -f function.zip response.json
+          echo "Limpieza completada"
+
+      - name: Resumen del despliegue
+        run: |
+          echo "Despliegue completado"
+          echo "Funcion: ${{ env.LAMBDA_FUNCTION_NAME }}"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "Timestamp: $(date)"
