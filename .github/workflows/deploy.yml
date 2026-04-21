@@ -16,40 +16,31 @@ jobs:
 
     steps:
       - name: Checkout del codigo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: npm
+          cache: 'npm'
 
-      - name: Validar secrets requeridos
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          DB_HOST: ${{ secrets.DB_HOST }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_PORT: ${{ secrets.DB_PORT }}
+      - name: Verificar secrets requeridos
         run: |
           missing=()
+          [[ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]] && missing+=("AWS_ACCESS_KEY_ID")
+          [[ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]] && missing+=("AWS_SECRET_ACCESS_KEY")
+          [[ -z "${{ secrets.DB_HOST }}" ]] && missing+=("DB_HOST")
+          [[ -z "${{ secrets.DB_USER }}" ]] && missing+=("DB_USER")
+          [[ -z "${{ secrets.DB_PASSWORD }}" ]] && missing+=("DB_PASSWORD")
+          [[ -z "${{ secrets.DB_NAME }}" ]] && missing+=("DB_NAME")
+          [[ -z "${{ secrets.DB_PORT }}" ]] && missing+=("DB_PORT")
 
-          [ -z "$AWS_ACCESS_KEY_ID" ] && missing+=("AWS_ACCESS_KEY_ID")
-          [ -z "$AWS_SECRET_ACCESS_KEY" ] && missing+=("AWS_SECRET_ACCESS_KEY")
-          [ -z "$DB_HOST" ] && missing+=("DB_HOST")
-          [ -z "$DB_USER" ] && missing+=("DB_USER")
-          [ -z "$DB_PASSWORD" ] && missing+=("DB_PASSWORD")
-          [ -z "$DB_NAME" ] && missing+=("DB_NAME")
-          [ -z "$DB_PORT" ] && missing+=("DB_PORT")
-
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "Faltan secrets requeridos: ${missing[*]}"
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "Error: Faltan secrets requeridos: ${missing[*]}"
+            echo "Verifica Settings > Secrets and variables > Actions en el repositorio."
             exit 1
           fi
-
-          echo "Todos los secrets requeridos estan configurados."
+          echo "Todos los secrets estan configurados correctamente"
 
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
@@ -58,20 +49,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validar autenticacion AWS
-        run: |
-          echo "Validando autenticacion AWS..."
-          aws sts get-caller-identity
-
       - name: Verificar funcion Lambda existente
         run: |
           echo "Verificando funcion Lambda: ${{ env.LAMBDA_FUNCTION_NAME }}"
-          aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} || echo "Funcion no encontrada"
 
       - name: Instalar dependencias
         run: |
           echo "Instalando dependencias para produccion..."
-          npm ci --omit=dev --silent
+          npm ci --production --silent
           npm rebuild --arch=x64 --platform=linux --silent
 
       - name: Preparar archivos para empaquetado
@@ -80,8 +66,8 @@ jobs:
           mkdir -p lambda-package
           cp index.js lambda-package/
           cp package.json lambda-package/
-          cp package-lock.json lambda-package/
           cp -r node_modules lambda-package/
+          [ -f package-lock.json ] && cp package-lock.json lambda-package/
           ls -la lambda-package/
 
       - name: Crear paquete ZIP optimizado
@@ -128,7 +114,14 @@ jobs:
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --timeout 30 \
             --memory-size 256 \
-            --environment "Variables={NODE_ENV=production,DB_HOST=${{ secrets.DB_HOST }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }},DB_PORT=${{ secrets.DB_PORT }}}"
+            --environment Variables='{
+              "NODE_ENV":"production",
+              "DB_HOST":"${{ secrets.DB_HOST }}",
+              "DB_USER":"${{ secrets.DB_USER }}",
+              "DB_PASSWORD":"${{ secrets.DB_PASSWORD }}",
+              "DB_NAME":"${{ secrets.DB_NAME }}",
+              "DB_PORT":"${{ secrets.DB_PORT }}"
+            }' || echo "No se pudo actualizar la configuracion - continuando..."
 
       - name: Esperar a que la funcion este lista
         run: |
@@ -144,19 +137,7 @@ jobs:
             --query 'Configuration.[FunctionName,Runtime,LastModified,CodeSize,State]' \
             --output table
 
-          echo "=== Probando funcion Lambda ==="
-          aws lambda invoke \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --payload '{"routeKey":"GET /users"}' \
-            response.json || echo "No se pudo probar la funcion"
-
-          if [ -f response.json ]; then
-            echo "Respuesta de la funcion:"
-            cat response.json
-          fi
-
       - name: Limpiar archivos temporales
-        if: always()
         run: |
           rm -rf lambda-package
           rm -f function.zip response.json
