@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout del codigo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: npm
@@ -45,7 +45,8 @@ jobs:
           [ -z "$DB_PORT" ] && missing+=("DB_PORT")
 
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "Faltan secrets requeridos: ${missing[*]}"
+            echo "::error title=Secrets faltantes::Faltan secrets requeridos: ${missing[*]}"
+            echo "Verifica Settings > Secrets and variables > Actions en el repositorio."
             exit 1
           fi
 
