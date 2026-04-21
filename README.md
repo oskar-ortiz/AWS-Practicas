@@ -26,6 +26,13 @@ Configura estos secrets en `Settings > Secrets and variables > Actions` del repo
 
 El workflow `.github/workflows/deploy.yml` usa esos secrets para desplegar y para actualizar la configuracion de la Lambda.
 
+## Checklist antes del primer run
+
+- Crear los 7 secrets del repositorio:
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`
+- Validar que el usuario IAM `gitActions` tenga la policy minima de despliegue para `LambdaRds2`
+- Confirmar que la funcion `LambdaRds2` ya existe en `us-east-1`
+
 ## Policy minima para el usuario IAM `gitActions`
 
 ```json
