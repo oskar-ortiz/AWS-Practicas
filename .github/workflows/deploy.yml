@@ -40,7 +40,7 @@ jobs:
             echo "Verifica Settings > Secrets and variables > Actions en el repositorio."
             exit 1
           fi
-          echo " ✅ Todos los secrets estan configurados correctamente"
+          echo " Todos los secrets estan configurados correctamente"
 
       - name: Configurar credenciales de AWS
         uses: aws-actions/configure-aws-credentials@v4
